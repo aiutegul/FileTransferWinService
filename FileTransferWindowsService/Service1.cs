@@ -17,6 +17,7 @@ using System.Data.SqlClient;
 using System.Threading;
 using Newtonsoft.Json;
 using System.Xml;
+using FileTransferWindowsService.Models;
 
 namespace FileTransferWindowsService
 {
@@ -24,10 +25,9 @@ namespace FileTransferWindowsService
     {
         System.Timers.Timer timer = new System.Timers.Timer();
         private OracleConnection traxConnection;
-        private OracleConnection kcConnection;
         private OracleCommand cmd;
         private DateTime last_exec_time;
-        private decimal exec_time;
+        private int exec_time;
         public Service1()
         {
             InitializeComponent();
@@ -44,13 +44,18 @@ namespace FileTransferWindowsService
 
         private void OnElapsedTime(object sender, ElapsedEventArgs e)
         {
-            extract_exec_times();
+            using (var _context = new streamlogEntities())
+            {
+                exec_time = _context.TRAXPILT_SET.Select(i => i.EX_TIME).First().GetValueOrDefault();
+                last_exec_time = _context.TRAXPILT_SET.Select(i => i.LAST_EXECUTION_TIME).First();
+            }
+                
             TimeSpan timeSpan = DateTime.Now - last_exec_time;
 
-            if ((decimal)timeSpan.TotalMilliseconds > exec_time)
+            if (timeSpan.TotalMilliseconds > exec_time)
             {
                 PutWorkPackage();
-                update_exec_times(DateTime.Now);
+                update_exec_times();
             }
             else
             {
@@ -69,7 +74,8 @@ namespace FileTransferWindowsService
         {
             cmd = new OracleCommand();
             cmd.Connection = traxConnection;
-            cmd.CommandText = "select * from KC_TRAX_2_STREAM_XML_SOURCE where wo = 173388";
+            cmd.CommandText = "select * from KC_TRAX_2_STREAM_XML_SOURCE where created_date >= sysdate - " 
+                + ConfigurationManager.AppSettings["numLastDays"];
             cmd.CommandType = CommandType.Text;
             OracleDataReader dataReader = cmd.ExecuteReader();
             if (!dataReader.HasRows)
@@ -82,7 +88,7 @@ namespace FileTransferWindowsService
             while(dataReader.Read())
             {
                 string xmlContent = dataReader.GetOracleClob(0).Value;
-                var request = (HttpWebRequest)WebRequest.Create("https://services-uat.stream.aero/STREAM.Web.Api/Production-UAT/v2/WorkPackages/import");
+                var request = (HttpWebRequest)WebRequest.Create(ConfigurationManager.AppSettings["stream_url"]);
                 request.Method = "PUT";
                 request.ContentType = "application/xml";
                 string header_key = ConfigurationManager.AppSettings["header_key"];
@@ -123,10 +129,6 @@ namespace FileTransferWindowsService
                             WriteToFile("Success sending ScheduledWorkPackageDto with barcode:" + barcode);
                             WriteToFile("\n");
                         }
-                        else
-                        {
-                            WriteToFile("Problem at service " + DateTime.Now);
-                        }
                     }
 
                 }
@@ -161,58 +163,44 @@ namespace FileTransferWindowsService
             timer.Enabled = true;  // enable timer again for periodicity
         }
 
-    // get last execution time and execution periodicity (called ex_time) from traxdilt_set table
-    public void extract_exec_times()
-        {
-            try
-            {
-                cmd = new OracleCommand();
-                cmd.Connection = kcConnection;
-                cmd.CommandText = "select * from traxdilt_set";
-                DataTable dt = new DataTable();
-                OracleDataAdapter adapter = new OracleDataAdapter(cmd);
-                adapter.Fill(dt);
-                last_exec_time = (DateTime)dt.Rows[0]["last_execution_time"];
-                exec_time = (decimal)dt.Rows[0]["ex_time"];
-            }
-            catch(Exception ex)
-            {
-                WriteToFile("Could not extract exect_times " + ex.Message);
-            }
-        }
 
         // Write to the log database in oracle, calling oracle stored procedure for inserting values
-        public void WriteLog(string xmlSource, string response, decimal status)
+        public void WriteLog(string xmlSource, string response, int status)
         {
             try
             {
-                cmd = new OracleCommand();
-                cmd.Connection = kcConnection;
-                cmd.CommandText = "insert_traxdilt_logs_procedure";
-                cmd.CommandType = CommandType.StoredProcedure;
-                cmd.Parameters.Add("p_xml_source", OracleDbType.Clob).Value = xmlSource;
-                cmd.Parameters.Add("p_xml_response", OracleDbType.Clob).Value = response;
-                cmd.Parameters.Add("p_status", OracleDbType.Decimal).Value = status;
-                cmd.ExecuteNonQuery();
+                using (var _context = new streamlogEntities())
+                {
+                    TRAXPILT_LOG logEntry = new TRAXPILT_LOG
+                    {
+                        XML_SOURCE = xmlSource,
+                        XML_RESPONSE = response,
+                        STATUS = status,
+                        CREATE_DATE = DateTime.Now
+                    };
+                    _context.TRAXPILT_LOG.Add(logEntry);
+                    _context.SaveChanges();
+                }                
             }
             catch(Exception ex)
             {
-                WriteToFile("Could not write to log " + ex.Message);
+                WriteToFile("Could not write to log " + ex.ToString());
             }
 
         }
 
         // after putting the workpackage to STREAM web service, update last execution time using the function below:
-        public void update_exec_times(DateTime dateTime)
+        public void update_exec_times()
         {
             try
             {
-                cmd = new OracleCommand();
-                cmd.Connection = kcConnection;
-                cmd.CommandText = "update_time_traxdilt_set_proc";
-                cmd.CommandType = CommandType.StoredProcedure;
-                cmd.Parameters.Add("p_last_execution_time", OracleDbType.Date).Value = dateTime;
-                cmd.ExecuteNonQuery();
+                using (var _context = new streamlogEntities())
+                {
+                    var logSetting = _context.TRAXPILT_SET.FirstOrDefault(i => i.ID == 1);
+                    logSetting.LAST_EXECUTION_TIME = DateTime.Now;
+                    _context.SaveChanges();
+                }
+                
             }
             catch (Exception ex)
             {
@@ -225,9 +213,7 @@ namespace FileTransferWindowsService
             try
             {
                 traxConnection = new OracleConnection(ConfigurationManager.AppSettings["traxConnectionString"]);
-                kcConnection = new OracleConnection(ConfigurationManager.AppSettings["kcapptstConnectionString"]);
                 traxConnection.Open();
-                kcConnection.Open();
             }
             catch(Exception ex)
             {
@@ -240,7 +226,6 @@ namespace FileTransferWindowsService
             try
             {
                 traxConnection.Close();
-                kcConnection.Close();
             }
             catch(Exception ex)
             {
