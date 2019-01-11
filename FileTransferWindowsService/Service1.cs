@@ -9,7 +9,7 @@ using System.Configuration;
 using System.Threading;
 using System.Xml;
 using FileTransferWindowsService.Models;
-using Oracle.ManagedDataAccess.Client;
+using Oracle.DataAccess.Client;
 
 namespace FileTransferWindowsService
 {
