@@ -1,23 +1,15 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
 using System.Data;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.ServiceProcess;
-using System.Text;
-using System.Threading.Tasks;
 using System.Timers;
 using System.Configuration;
-using Oracle.DataAccess.Client;
-using Oracle.DataAccess.Types;
-using System.Data.SqlClient;
 using System.Threading;
-using Newtonsoft.Json;
 using System.Xml;
 using FileTransferWindowsService.Models;
+using Oracle.ManagedDataAccess.Client;
 
 namespace FileTransferWindowsService
 {
