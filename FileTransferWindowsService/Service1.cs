@@ -217,7 +217,7 @@ namespace FileTransferWindowsService
             }
             catch(Exception ex)
             {
-                WriteToFile("Could not open connections " + ex.Message + "\n" + ex.StackTrace);
+                WriteToFile("Could not open connections " + ex.Message + "\n" + ex.StackTrace+ "\nInner:\n"+ ex.InnerException?.Message+"\n"+ ex.InnerException?.StackTrace);
             }
         }
 
